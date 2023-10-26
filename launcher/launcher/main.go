@@ -62,6 +62,7 @@ func main() {
 	logger.SetOutput(io.MultiWriter(os.Stdout, serialConsole))
 
 	logger.Println("TEE container launcher initiating")
+	logger.Println("[zz-debug] TEE container launcher initiating")
 
 	if err := verifyFsAndMount(); err != nil {
 		logger.Print(err)
