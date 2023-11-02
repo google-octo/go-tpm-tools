@@ -22,6 +22,7 @@ import (
 	"github.com/google/go-tpm-tools/launcher/internal/experiments"
 	"github.com/google/go-tpm-tools/launcher/launcherfile"
 	"github.com/google/go-tpm-tools/launcher/spec"
+	"github.com/google/go-tpm-tools/launcher/launcher/cert_manager"
 	"github.com/google/go-tpm/legacy/tpm2"
 )
 
@@ -111,6 +112,12 @@ func main() {
 			logger.Printf("TEE container launcher exiting with exit code: %d\n", exitCode)
 		}
 	}()
+
+	// cert
+	if cert := cert_manager.CreatCert(); cert == nil {
+		logger.Println("failed to create cert")
+	}
+
 	if err = startLauncher(launchSpec, serialConsole); err != nil {
 		logger.Println(err)
 	}
