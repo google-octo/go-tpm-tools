@@ -8,9 +8,14 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
+	"fmt"
+	"io"
 	"math/big"
+	"net/http"
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/go-tpm-tools/launcher/agent"
 )
 
@@ -64,12 +69,10 @@ func bindCert(cert []byte, peerVM string, attestAgent agent.AttestationAgent) ([
 	// use attestation agent to get a customized audience token
 	fingerprint := md5.Sum(cert)
 
-	str1 := string(fingerprint[:])
-
 	token, err := attestAgent.Attest(context.Background(),
 		agent.AttestAgentOpts{
 			Aud:    peerVM,
-			Nonces: []string{str1},
+			Nonces: []string{string(fingerprint[:])},
 		},
 	)
 	if err != nil {
@@ -77,4 +80,59 @@ func bindCert(cert []byte, peerVM string, attestAgent agent.AttestationAgent) ([
 	}
 
 	return token, nil
+}
+
+type jwksFile struct {
+	Keys []jwk `json:"keys"`
+}
+
+type jwk struct {
+	Alg string `json:"alg"`
+	Kty string `json:"kty"`
+	N   string `json:"n"`
+	Use string `json:"use"`
+	Kid string `json:"kid"`
+	E   string `json:"e"`
+}
+
+// verifyCertBinding will very
+func verifyCertBinding(cert []byte, tokenBytes []byte) error {
+	httpClient := http.Client{}
+	// get the jwk for verify token
+	resp, err := httpClient.Get("https://www.googleapis.com/service_accounts/v1/metadata/jwk/signer@confidentialspace-sign.iam.gserviceaccount.com")
+	if err != nil {
+		return err
+	}
+	jwkbytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read JWK body: %w", err)
+	}
+
+	file := jwksFile{}
+	err = json.Unmarshal(jwkbytes, &file)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshall JWK content: %w", err)
+	}
+	mapClaims := jwt.MapClaims{}
+	_, _, err = jwt.NewParser().ParseUnverified(string(tokenBytes), mapClaims)
+	if err != nil {
+		return err
+	}
+
+	// TODO: Read the token
+	claims := jwt.MapClaims{}
+
+	token, err := jwt.ParseWithClaims(string(tokenBytes), claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte("<YOUR VERIFICATION KEY>"), nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	if !token.Valid {
+		return fmt.Errorf("invalid token")
+	}
+
+	return nil
 }
