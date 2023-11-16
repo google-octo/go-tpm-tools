@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package attest;
+
+option go_package = "github.com/google/go-tpm-tools/launcher/certs";
+
+message TeeCertNegotiateRequest {
+    bytes cert = 1;
+    bytes token = 2;
+}
+
+message TeeCertNegotiateResponse {
+    bytes cert = 1;
+    bytes token = 2;
+}
+
+service TeeCert {
+    rpc NegotiateCert(TeeCertNegotiateRequest) returns (TeeCertNegotiateResponse) {}
+}
+ 
