@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 
+	// "github.com/google/go-attestation/attes/t"
+
 	"github.com/google/go-attestation/attest"
 	"github.com/google/go-tpm-tools/cel"
 	pb "github.com/google/go-tpm-tools/proto/attest"

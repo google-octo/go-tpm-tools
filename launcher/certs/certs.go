@@ -17,6 +17,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/go-tpm-tools/launcher/agent"
+	grpc "google.golang.org/grpc"
 )
 
 // genCert create a cert for the TEE enviornment
@@ -133,6 +134,44 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	if !token.Valid {
 		return fmt.Errorf("invalid token")
 	}
+
+	return nil
+}
+
+// initNegotiate will call the peer to establish the cert
+func initNegotiate(peer string, aa agent.AttestationAgent) error {
+	conn, err := grpc.Dial(peer)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	client := NewTeeCertClient(conn)
+
+	xx, _, err := genCert("myname")
+	if err != nil {
+		return err
+	}
+
+	x, err := bindCert(xx, peer, aa)
+	if err != nil {
+		return err
+	}
+
+	res, err := client.NegotiateCert(context.Background(), &TeeCertNegotiateRequest{
+		Cert: xx, Token: x})
+
+	if err != nil {
+		return err
+	}
+
+	err = verifyCertBinding(res.Cert, res.Token)
+
+	if err != nil {
+		return err
+	}
+
+	// TODO add cert to trust store
 
 	return nil
 }
