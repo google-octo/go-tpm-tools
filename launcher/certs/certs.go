@@ -13,6 +13,8 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
@@ -166,12 +168,39 @@ func initNegotiate(peer string, aa agent.AttestationAgent) error {
 	}
 
 	err = verifyCertBinding(res.Cert, res.Token)
-
 	if err != nil {
 		return err
 	}
 
-	// TODO add cert to trust store
+	err = addCertToTrustStore(res.Cert)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func addCertToTrustStore(cert []byte) error {
+	trustStoreFile := "/etc/ssl/certs/ca-certificates.crt"
+
+	trustStoreData, err := os.ReadFile(trustStoreFile)
+	if err != nil {
+		return err
+	}
+
+	trustStoreData = append(trustStoreData, cert...)
+
+	err = os.WriteFile(trustStoreFile, trustStoreData, 0644)
+	if err != nil {
+		return err
+	}
+
+	cmd := exec.Command("update-ca-certificates")
+
+	err = cmd.Run()
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
