@@ -8,10 +8,13 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -20,10 +23,11 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/go-tpm-tools/launcher/agent"
 	grpc "google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // genCert create a cert for the TEE enviornment
-func genCert(vmName string) ([]byte, *ecdsa.PrivateKey, error) {
+func GenCert(vmName string) ([]byte, *ecdsa.PrivateKey, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 
 	if err != nil {
@@ -72,10 +76,22 @@ func bindCert(cert []byte, peerVM string, attestAgent agent.AttestationAgent) ([
 	// use attestation agent to get a customized audience token
 	fingerprint := md5.Sum(cert)
 
+	//
+	fmt.Println("BINDINGCERTS")
+
+	hashsum := hex.EncodeToString(fingerprint[:])
+	fmt.Println(fingerprint)
+	fmt.Println(hashsum)
+
+	// strings.ToValidUTF8()
+
+	fmt.Println("----")
+
 	token, err := attestAgent.Attest(context.Background(),
 		agent.AttestAgentOpts{
 			Aud:    peerVM,
-			Nonces: []string{string(fingerprint[:])},
+			Nonces: []string{hashsum},
+			tokenType
 		},
 	)
 	if err != nil {
@@ -141,8 +157,8 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 }
 
 // initNegotiate will call the peer to establish the cert
-func initNegotiate(peer string, aa agent.AttestationAgent) error {
-	conn, err := grpc.Dial(peer)
+func InitNegotiate(peer string, aa agent.AttestationAgent) error {
+	conn, err := grpc.Dial(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
 	}
@@ -150,7 +166,7 @@ func initNegotiate(peer string, aa agent.AttestationAgent) error {
 
 	client := NewTeeCertClient(conn)
 
-	xx, _, err := genCert("myname")
+	xx, _, err := GenCert("myname")
 	if err != nil {
 		return err
 	}
@@ -159,6 +175,8 @@ func initNegotiate(peer string, aa agent.AttestationAgent) error {
 	if err != nil {
 		return err
 	}
+
+	fmt.Println("INIT CERTSSS")
 
 	res, err := client.NegotiateCert(context.Background(), &TeeCertNegotiateRequest{
 		Cert: xx, Token: x})
@@ -198,6 +216,29 @@ func addCertToTrustStore(cert []byte) error {
 	cmd := exec.Command("update-ca-certificates")
 
 	err = cmd.Run()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func StartServer() error {
+	port := 4111
+	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	var opts []grpc.ServerOption
+
+	grpcServer := grpc.NewServer(opts...)
+
+	ss := server{}
+
+	RegisterTeeCertServer(grpcServer, ss.tcs)
+
+	err = grpcServer.Serve(lis)
 	if err != nil {
 		return err
 	}

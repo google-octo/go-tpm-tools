@@ -7,7 +7,7 @@ import (
 )
 
 func TestCert(t *testing.T) {
-	cert, key, err := genCert("testvm")
+	cert, key, err := GenCert("testvm")
 	if err != nil {
 		log.Fatal(err)
 	}

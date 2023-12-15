@@ -29,6 +29,7 @@ import (
 	"github.com/google/go-tpm-tools/cel"
 	"github.com/google/go-tpm-tools/client"
 	"github.com/google/go-tpm-tools/launcher/agent"
+	"github.com/google/go-tpm-tools/launcher/certs"
 	"github.com/google/go-tpm-tools/launcher/internal/signaturediscovery"
 	"github.com/google/go-tpm-tools/launcher/internal/systemctl"
 	"github.com/google/go-tpm-tools/launcher/launcherfile"
@@ -491,9 +492,9 @@ func (r *ContainerRunner) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if err := r.measureContainerClaims(ctx); err != nil {
-		return fmt.Errorf("failed to measure container claims: %v", err)
-	}
+	// if err := r.measureContainerClaims(ctx); err != nil {
+	// 	return fmt.Errorf("failed to measure container claims: %v", err)
+	// }
 	if err := r.fetchAndWriteToken(ctx); err != nil {
 		return fmt.Errorf("failed to fetch and write OIDC token: %v", err)
 	}
@@ -528,6 +529,25 @@ func (r *ContainerRunner) Run(ctx context.Context) error {
 		} else {
 			r.logger.Println("MemoryMonitoring is disabled by the VM operator")
 		}
+	}
+	// start server
+
+	fmt.Println("INIT  GEN CERTS")
+	certs.GenCert("dsfadfasdf")
+
+	go func() {
+		fmt.Println("START SERVER")
+
+		err := certs.StartServer()
+		if err != nil {
+			fmt.Println(err)
+		}
+	}()
+
+	fmt.Println("INIT NEGOIST")
+	err := certs.InitNegotiate("localhost:4111", r.attestAgent)
+	if err != nil {
+		return err
 	}
 
 	var streamOpt cio.Opt
