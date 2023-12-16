@@ -6,22 +6,28 @@ import (
 	"crypto/elliptic"
 	"crypto/md5"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/go-tpm-tools/launcher/agent"
+	"golang.org/x/oauth2"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -84,14 +90,13 @@ func bindCert(cert []byte, peerVM string, attestAgent agent.AttestationAgent) ([
 	fmt.Println(hashsum)
 
 	// strings.ToValidUTF8()
-
 	fmt.Println("----")
 
 	token, err := attestAgent.Attest(context.Background(),
 		agent.AttestAgentOpts{
-			Aud:    peerVM,
-			Nonces: []string{hashsum},
-			tokenType
+			Aud:       peerVM,
+			Nonces:    []string{hashsum},
+			TokenType: "OIDC",
 		},
 	)
 	if err != nil {
@@ -118,6 +123,8 @@ type jwk struct {
 func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	httpClient := http.Client{}
 	// get the jwk for verify token
+	// https://confidentialcomputing.googleapis.com/.well-known/openid-configuration
+	// https://www.googleapis.com/service_accounts/v1/metadata/jwk/signer@confidentialspace-sign.iam.gserviceaccount.com
 	resp, err := httpClient.Get("https://www.googleapis.com/service_accounts/v1/metadata/jwk/signer@confidentialspace-sign.iam.gserviceaccount.com")
 	if err != nil {
 		return err
@@ -127,26 +134,35 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 		return fmt.Errorf("failed to read JWK body: %w", err)
 	}
 
-	file := jwksFile{}
+	file := jwksFile{} // KEY FILE
 	err = json.Unmarshal(jwkbytes, &file)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshall JWK content: %w", err)
+
 	}
-	mapClaims := jwt.MapClaims{}
-	_, _, err = jwt.NewParser().ParseUnverified(string(tokenBytes), mapClaims)
-	if err != nil {
-		return err
-	}
+	fmt.Println("KEYFILE: ", file)
 
 	// TODO: Read the token
 	claims := jwt.MapClaims{}
 
-	token, err := jwt.ParseWithClaims(string(tokenBytes), claims, func(token *jwt.Token) (interface{}, error) {
-		return []byte("<YOUR VERIFICATION KEY>"), nil
-	})
-
+	xx, err := parseToken(string(tokenBytes))
 	if err != nil {
 		return err
+	}
+
+	fmt.Println("ACCESS TOKEN", xx.AccessToken)
+
+	// token, parts, err := jwt.Parser.ParseUnverified(tokenString, claims)
+
+	token, err := jwt.ParseWithClaims(string(tokenBytes), &claims, func(token *jwt.Token) (interface{}, error) {
+		fmt.Println("my header", token.Header)
+		fmt.Println("mykey is", file.Keys[1])
+
+		return getRSAPublicKeyFromJWK(file.Keys[1])
+	})
+	if err != nil {
+		fmt.Println("failed to parse:: ", token)
+		return fmt.Errorf("failed to paeeesr, %v", err)
 	}
 
 	if !token.Valid {
@@ -154,6 +170,40 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	}
 
 	return nil
+}
+
+// getRSAPublicKeyFromJWK extracts a raw RSA public key from a JWK.
+func getRSAPublicKeyFromJWK(j jwk) (*rsa.PublicKey, error) {
+	// Ensure the key type is RSA.
+	if j.Kty != "RSA" {
+		return nil, fmt.Errorf("invalid key type: %s", j.Kty)
+	}
+
+	// Get the public key components.
+	n, err := base64.RawURLEncoding.DecodeString(j.N)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode 'n': %v", err)
+	}
+	e, err := base64.RawURLEncoding.DecodeString(j.E)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode 'n': %v", err)
+	}
+
+	e = append([]byte{0}, e...)
+	// fmt.Println("-------------", e)
+	eee := binary.BigEndian.Uint32(e)
+	// eee := binary.Uint64(e)
+
+	fmt.Println(eee)
+	ee := int(eee)
+
+	fmt.Println(ee)
+
+	// Construct and return the public key.
+	return &rsa.PublicKey{
+		N: new(big.Int).SetBytes(n),
+		E: ee,
+	}, nil
 }
 
 // initNegotiate will call the peer to establish the cert
@@ -234,9 +284,9 @@ func StartServer() error {
 
 	grpcServer := grpc.NewServer(opts...)
 
-	ss := server{}
+	ss := &server{}
 
-	RegisterTeeCertServer(grpcServer, ss.tcs)
+	RegisterTeeCertServer(grpcServer, ss)
 
 	err = grpcServer.Serve(lis)
 	if err != nil {
@@ -244,4 +294,57 @@ func StartServer() error {
 	}
 
 	return nil
+}
+
+// parseToken parses the token ID from the request.
+func parseToken(idToken string) (*oauth2.Token, error) {
+	// Split the token into its parts.
+	parts := strings.Split(idToken, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("Invalid token format: %s", idToken)
+	}
+
+	// Decode the payload.
+	payload, err := decodeSegment(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("Failed to decode token payload: %v", err)
+	}
+
+	// Parse the payload as JSON.
+	var payloadMap map[string]interface{}
+	if err := json.Unmarshal(payload, &payloadMap); err != nil {
+		return nil, fmt.Errorf("Failed to parse token payload: %v", err)
+	}
+
+	// Get the token information.
+	token := &oauth2.Token{
+		AccessToken:  idToken,
+		TokenType:    "Bearer",
+		RefreshToken: payloadMap["sub"].(string),
+		Expiry:       time.Unix(int64(payloadMap["exp"].(float64)), 0),
+	}
+
+	return token, nil
+}
+
+func decodeSegment(seg string) ([]byte, error) {
+	// Pad the segment with '=' characters.
+	seg = strings.Replace(seg, "-", "+", -1)
+	seg = strings.Replace(seg, "_", "/", -1)
+	switch len(seg) % 4 {
+	case 0:
+	case 2:
+		seg += "=="
+	case 3:
+		seg += "="
+	default:
+		return nil, fmt.Errorf("Invalid token segment length")
+	}
+
+	// Decode the segment.
+	data, err := ioutil.ReadAll(base64.NewDecoder(base64.StdEncoding, strings.NewReader(seg)))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to decode token segment: %v", err)
+	}
+	return data, nil
 }

@@ -111,6 +111,8 @@ func (a *agent) Attest(ctx context.Context, opts AttestAgentOpts) ([]byte, error
 		},
 	}
 
+	// fmt.Println(req)
+
 	if a.launchSpec.Experiments.EnableSignedContainerImage {
 		signatures := fetchContainerImageSignatures(ctx, a.sigsFetcher, a.launchSpec.SignedImageRepos, a.logger)
 		if len(signatures) > 0 {
@@ -118,6 +120,8 @@ func (a *agent) Attest(ctx context.Context, opts AttestAgentOpts) ([]byte, error
 			a.logger.Printf("Found container image signatures: %v\n", signatures)
 		}
 	}
+
+	fmt.Println("VERIFYATTESTATION")
 
 	resp, err := a.client.VerifyAttestation(ctx, req)
 	if err != nil {
