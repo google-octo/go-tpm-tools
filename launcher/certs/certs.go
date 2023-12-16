@@ -79,16 +79,7 @@ func GenCert(vmName string) ([]byte, *ecdsa.PrivateKey, error) {
 // bindCert will get a token and return it with the fingerprint of the cert and audience
 // being the other party
 func bindCert(cert []byte, peerVM string, attestAgent agent.AttestationAgent) ([]byte, error) {
-	// use attestation agent to get a customized audience token
-	fingerprint := md5.Sum(cert)
-
-	//
-	fmt.Println("BINDINGCERTS")
-
-	hashsum := hex.EncodeToString(fingerprint[:])
-	fmt.Println(fingerprint)
-	fmt.Println(hashsum)
-
+	hashsum := calculateFingerprint(cert)
 	// strings.ToValidUTF8()
 	fmt.Println("----")
 
@@ -166,10 +157,35 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	}
 
 	if !token.Valid {
-		return fmt.Errorf("invalid token")
+		return fmt.Errorf("!!!!!!!!!!!!!!!!invalid token")
+	}
+	// check fingerprint
+	fmt.Println("------------------------------")
+
+	fmt.Println(calculateFingerprint(cert))
+	fmt.Println(claims["eat_nonce"])
+	// fmt.Println(token)
+
+	if claims["eat_nonce"] != calculateFingerprint(cert) {
+		return fmt.Errorf("FINGER PRINT NOT MATCHING!@!!!!! %s != %s", calculateFingerprint(cert), claims["eat_nonce"])
 	}
 
+	// TODO: ADD MORE VERIFICATION HERE, like container id and other claims
+
+	fmt.Println("==============VERIFY OK===============")
+
 	return nil
+}
+
+func calculateFingerprint(cert []byte) string {
+	// use attestation agent to get a customized audience token
+	fingerprint := md5.Sum(cert)
+
+	hashsum := hex.EncodeToString(fingerprint[:])
+	// fmt.Println(fingerprint)
+	// fmt.Println(hashsum)
+
+	return hashsum
 }
 
 // getRSAPublicKeyFromJWK extracts a raw RSA public key from a JWK.
