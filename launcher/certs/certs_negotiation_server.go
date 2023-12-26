@@ -21,5 +21,9 @@ func (s *server) NegotiateCert(ctx context.Context, in *TeeCertNegotiateRequest)
 		return nil, err
 	}
 
+	// store the cert into trust store
+	addCertToTrustStore(in.Cert)
+
+	// replying my cert to the peer
 	return &TeeCertNegotiateResponse{Cert: []byte("mycert"), Token: []byte("mytoken")}, nil
 }

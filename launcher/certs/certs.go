@@ -13,6 +13,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -21,7 +23,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -116,6 +117,7 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	// get the jwk for verify token
 	// https://confidentialcomputing.googleapis.com/.well-known/openid-configuration
 	// https://www.googleapis.com/service_accounts/v1/metadata/jwk/signer@confidentialspace-sign.iam.gserviceaccount.com
+	// should not hard code, but
 	resp, err := httpClient.Get("https://www.googleapis.com/service_accounts/v1/metadata/jwk/signer@confidentialspace-sign.iam.gserviceaccount.com")
 	if err != nil {
 		return err
@@ -147,9 +149,22 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 
 	token, err := jwt.ParseWithClaims(string(tokenBytes), &claims, func(token *jwt.Token) (interface{}, error) {
 		fmt.Println("my header", token.Header)
-		fmt.Println("mykey is", file.Keys[1])
+		// fmt.Println("mykeyID is", file.Keys[1].Kid)
+		fmt.Println("token kid")
 
-		return getRSAPublicKeyFromJWK(file.Keys[1])
+		fmt.Println("PICKING THE RIGHT KEY")
+
+		fmt.Println(token.Claims)
+
+		fmt.Println(token.Header["kid"])
+
+		for i, kk := range file.Keys {
+			if kk.Kid == token.Header["kid"].(string) {
+				return getRSAPublicKeyFromJWK(file.Keys[i])
+			}
+		}
+
+		return nil, errors.New("cannot find corresponding key!!")
 	})
 	if err != nil {
 		fmt.Println("failed to parse:: ", token)
@@ -242,7 +257,7 @@ func InitNegotiate(peer string, aa agent.AttestationAgent) error {
 		return err
 	}
 
-	fmt.Println("INIT CERTSSS")
+	fmt.Println("INIT CERT")
 
 	res, err := client.NegotiateCert(context.Background(), &TeeCertNegotiateRequest{
 		Cert: xx, Token: x})
@@ -256,6 +271,8 @@ func InitNegotiate(peer string, aa agent.AttestationAgent) error {
 		return err
 	}
 
+	// add cert to trust store,
+	// make sure the cert is PEM format
 	err = addCertToTrustStore(res.Cert)
 	if err != nil {
 		return err
@@ -265,33 +282,61 @@ func InitNegotiate(peer string, aa agent.AttestationAgent) error {
 }
 
 func addCertToTrustStore(cert []byte) error {
-	trustStoreFile := "/etc/ssl/certs/ca-certificates.crt"
+	// I'm not sure how to add the cert to Trust store, as /usr/share/ca-certificates/
+	// on a COS VM is read only.
+	// So this will write the cert directly to the shared volumne with the cotnianer, the
+	// workload
+	// trustStoreFile := "/etc/ssl/certs/ca-certificates.crt"
 
-	trustStoreData, err := os.ReadFile(trustStoreFile)
+	x509cert, err := x509.ParseCertificate(cert)
 	if err != nil {
+		fmt.Println("Error:", err)
 		return err
 	}
 
-	trustStoreData = append(trustStoreData, cert...)
+	fmt.Printf("%+v", x509cert)
 
-	err = os.WriteFile(trustStoreFile, trustStoreData, 0644)
+	fmt.Printf(string(x509cert.Subject.CommonName))
+
+	pemCert := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: x509cert.Raw,
+	})
+
+	// trustStoreData, err := os.ReadFile(trustStoreFile)
+	// if err != nil {
+	// 	return err
+	// }
+	// fmt.Println("Writing cert to file")
+	// fmt.Println(string(pemCert))
+	// trustStoreData = append(trustStoreData, pemCert...)
+
+	// err = os.WriteFile(trustStoreFile, trustStoreData, 0644)
+	// if err != nil {
+	// 	return err
+	// }
+
+	certfilenamepath := "/tmp/container_launcher/" + string(x509cert.Subject.CommonName)
+
+	err = os.WriteFile(certfilenamepath, pemCert, 0644)
 	if err != nil {
 		return err
 	}
+	// cmd := exec.Command("update-ca-certificates")
 
-	cmd := exec.Command("update-ca-certificates")
+	// err = cmd.Run()
+	// if err != nil {
+	// 	return err
+	// }
 
-	err = cmd.Run()
-	if err != nil {
-		return err
-	}
+	fmt.Println("cert added to", certfilenamepath)
 
 	return nil
 }
 
 func StartServer() error {
-	port := 4111
-	lis, err := net.Listen("tcp", fmt.Sprintf("localhost:%d", port))
+	port := 80
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -304,7 +349,9 @@ func StartServer() error {
 
 	RegisterTeeCertServer(grpcServer, ss)
 
+	fmt.Println("listening")
 	err = grpcServer.Serve(lis)
+
 	if err != nil {
 		return err
 	}

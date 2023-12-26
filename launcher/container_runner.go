@@ -15,6 +15,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/compute/metadata"
@@ -532,22 +533,24 @@ func (r *ContainerRunner) Run(ctx context.Context) error {
 	}
 	// start server
 
-	fmt.Println("INIT  GEN CERTS")
+	fmt.Println("INIT GEN CERTS")
 	certs.GenCert("dsfadfasdf")
 
-	go func() {
-		fmt.Println("START SERVER")
+	var wg sync.WaitGroup
 
-		err := certs.StartServer()
-		if err != nil {
-			fmt.Println(err)
-		}
-	}()
+	fmt.Println("START SERVER")
+	wg.Add(1)
 
+	// Don't init on server automatically
 	fmt.Println("INIT NEGOIST")
-	err := certs.InitNegotiate("localhost:4111", r.attestAgent)
+	err := certs.InitNegotiate("ateeserverplatform.us-west1-b.c.jiankun-vm-test.internal:80", r.attestAgent)
 	if err != nil {
-		return err
+		fmt.Println(err)
+	}
+
+	err = certs.StartServer()
+	if err != nil {
+		fmt.Println(err)
 	}
 
 	var streamOpt cio.Opt
