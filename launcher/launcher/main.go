@@ -175,6 +175,12 @@ func startLauncher(launchSpec spec.LaunchSpec, serialConsole *os.File) error {
 	}
 	defer tpm.Close()
 
+	pcrss, err := client.ReadAllPCRs(tpm)
+	if err != nil {
+		return err
+	}
+	logger.Println(pcrss)
+
 	// check AK (EK signing) cert
 	gceAk, err := client.GceAttestationKeyECC(tpm)
 	if err != nil {

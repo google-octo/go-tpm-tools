@@ -15,7 +15,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"cloud.google.com/go/compute/metadata"
@@ -531,27 +530,43 @@ func (r *ContainerRunner) Run(ctx context.Context) error {
 			r.logger.Println("MemoryMonitoring is disabled by the VM operator")
 		}
 	}
-	// start server
 
-	fmt.Println("INIT GEN CERTS")
-	certs.GenCert("dsfadfasdf")
+	// --- cert start server
 
-	var wg sync.WaitGroup
+	r.logger.Println("INIT GEN CERTS")
+	mycrt, _, err := certs.GenCert(r.launchSpec.Hostname)
+	if err != nil {
+		return err
+	}
 
-	fmt.Println("START SERVER")
-	wg.Add(1)
+	// var wg sync.WaitGroup
 
-	// Don't init on server automatically
-	fmt.Println("INIT NEGOIST")
-	err := certs.InitNegotiate("ateeserverplatform.us-west1-b.c.jiankun-vm-test.internal:80", r.attestAgent)
+	// wg.add(1)
+	go func() {
+		err := certs.StartServer(mycrt, r.attestAgent)
+		r.logger.Println("STARTING CERT SERVER")
+
+		if err != nil {
+			r.logger.Println("SERVER FAIL")
+			r.logger.Println(err)
+		}
+		r.logger.Println("SERVER EXIT")
+	}()
 	if err != nil {
 		fmt.Println(err)
 	}
+	r.logger.Println("CERT SERVER START")
 
-	err = certs.StartServer()
-	if err != nil {
-		fmt.Println(err)
+	// Negotiate only when master url is set by the operator
+	if r.launchSpec.MasterURL != "" {
+		r.logger.Println("INIT NEGOTIATING to ", r.launchSpec.MasterURL)
+		err := certs.InitNegotiate(r.launchSpec.MasterURL, mycrt, r.attestAgent)
+		if err != nil {
+			r.logger.Println(err)
+		}
 	}
+	r.logger.Println("CERT SERVER FINISH")
+	// -----
 
 	var streamOpt cio.Opt
 	switch r.launchSpec.LogRedirect {

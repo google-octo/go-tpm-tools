@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -66,12 +67,27 @@ func GenCert(vmName string) ([]byte, *ecdsa.PrivateKey, error) {
 		return nil, nil, err
 	}
 
-	// certPEMblock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDer})
-	// keyBytes, err := x509.MarshalECPrivateKey(priv)
-	// if err != nil {
-	// 	return nil, nil, err
-	// }
-	// keyPEMblock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+	certPEMblock := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDer})
+	keyBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyPEMblock := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+
+	certpem, err := os.Create("/tmp/container_launcher/mycert.pem")
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err = certpem.Write(certPEMblock); err != nil {
+		return nil, nil, err
+	}
+	keypem, err := os.Create("/tmp/container_launcher/mykey.pem")
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err = keypem.Write(keyPEMblock); err != nil {
+		return nil, nil, err
+	}
 
 	return certDer, priv, nil
 
@@ -111,7 +127,7 @@ type jwk struct {
 	E   string `json:"e"`
 }
 
-// verifyCertBinding will very
+// verifyCertBinding
 func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	httpClient := http.Client{}
 	// get the jwk for verify token
@@ -138,6 +154,7 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	// TODO: Read the token
 	claims := jwt.MapClaims{}
 
+	fmt.Println(string(tokenBytes))
 	xx, err := parseToken(string(tokenBytes))
 	if err != nil {
 		return err
@@ -168,7 +185,7 @@ func verifyCertBinding(cert []byte, tokenBytes []byte) error {
 	})
 	if err != nil {
 		fmt.Println("failed to parse:: ", token)
-		return fmt.Errorf("failed to paeeesr, %v", err)
+		return fmt.Errorf("failed to parse, %v", err)
 	}
 
 	if !token.Valid {
@@ -237,8 +254,8 @@ func getRSAPublicKeyFromJWK(j jwk) (*rsa.PublicKey, error) {
 	}, nil
 }
 
-// initNegotiate will call the peer to establish the cert
-func InitNegotiate(peer string, aa agent.AttestationAgent) error {
+// initNegotiate will call the peer (usually the master) to exchange the cert
+func InitNegotiate(peer string, mycert []byte, aa agent.AttestationAgent) error {
 	conn, err := grpc.Dial(peer, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
@@ -247,20 +264,22 @@ func InitNegotiate(peer string, aa agent.AttestationAgent) error {
 
 	client := NewTeeCertClient(conn)
 
-	xx, _, err := GenCert("myname")
-	if err != nil {
-		return err
-	}
+	// xx, _, err := GenCert("myname")
+	// if err != nil {
+	// 	return err
+	// }
 
-	x, err := bindCert(xx, peer, aa)
+	// prepare my token to peer
+	x, err := bindCert(mycert, peer, aa)
 	if err != nil {
 		return err
 	}
 
 	fmt.Println("INIT CERT")
 
+	// get counterparty cert
 	res, err := client.NegotiateCert(context.Background(), &TeeCertNegotiateRequest{
-		Cert: xx, Token: x})
+		Cert: mycert, Token: x})
 
 	if err != nil {
 		return err
@@ -270,6 +289,9 @@ func InitNegotiate(peer string, aa agent.AttestationAgent) error {
 	if err != nil {
 		return err
 	}
+
+	// addition verification
+	// dns and ip address, addition claims verify
 
 	// add cert to trust store,
 	// make sure the cert is PEM format
@@ -334,9 +356,19 @@ func addCertToTrustStore(cert []byte) error {
 	return nil
 }
 
-func StartServer() error {
-	port := 80
+func StartServer(mycrt []byte, agt agent.AttestationAgent) error {
+	port := 81
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+
+	// open ports
+	cmd := exec.Command("/sbin/iptables", "-A", "INPUT", "-p", "tcp", "--dport", "81", "-j", "ACCEPT")
+	stdout, err := cmd.Output()
+
+	log.Print(stdout)
+	if err != nil {
+		fmt.Println(err.Error())
+		return err
+	}
 
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -345,11 +377,10 @@ func StartServer() error {
 
 	grpcServer := grpc.NewServer(opts...)
 
-	ss := &server{}
+	ss := &server{mycert: mycrt, attesta: agt}
 
 	RegisterTeeCertServer(grpcServer, ss)
 
-	fmt.Println("listening")
 	err = grpcServer.Serve(lis)
 
 	if err != nil {

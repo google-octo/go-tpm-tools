@@ -66,6 +66,7 @@ const (
 	attestationServiceAddrKey  = "tee-attestation-service-endpoint"
 	logRedirectKey             = "tee-container-log-redirect"
 	memoryMonitoringEnable     = "tee-monitoring-memory-enable"
+	masterURLkey               = "tee-master-url"
 )
 
 const (
@@ -97,6 +98,8 @@ type LaunchSpec struct {
 	MemoryMonitoringEnabled    bool
 	LogRedirect                LogRedirectLocation
 	Experiments                experiments.Experiments
+	MasterURL                  string // TEE to TEE connection master sever
+	Hostname                   string
 }
 
 // UnmarshalJSON unmarshals an instance attributes list in JSON format from the metadata
@@ -162,7 +165,21 @@ func (s *LaunchSpec) UnmarshalJSON(b []byte) error {
 
 	s.AttestationServiceAddr = unmarshaledMap[attestationServiceAddrKey]
 
+	// master server location
+	if val, ok := unmarshaledMap[masterURLkey]; ok && val != "" {
+		s.MasterURL = val
+	}
+
 	return nil
+}
+
+func getHost(client *metadata.Client) (string, error) {
+
+	hostname, err := client.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("failed to retrieve hostname from MDS: %v", err)
+	}
+	return hostname, err
 }
 
 func getRegion(client *metadata.Client) (string, error) {
@@ -198,6 +215,11 @@ func GetLaunchSpec(client *metadata.Client) (LaunchSpec, error) {
 	}
 
 	spec.Region, err = getRegion(client)
+	if err != nil {
+		return LaunchSpec{}, err
+	}
+
+	spec.Hostname, err = getHost(client)
 	if err != nil {
 		return LaunchSpec{}, err
 	}
