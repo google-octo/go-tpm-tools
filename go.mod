@@ -9,7 +9,7 @@ require (
 	github.com/google/go-tdx-guest v0.2.3-0.20231011100059-4cf02bed9d33
 	github.com/google/go-tpm v0.9.0
 	github.com/google/logger v1.1.1
-	google.golang.org/protobuf v1.31.0
+	google.golang.org/protobuf v1.33.0
 )
 
 require (
