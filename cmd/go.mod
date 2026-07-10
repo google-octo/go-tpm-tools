@@ -1,6 +1,6 @@
 module github.com/google/go-tpm-tools/cmd
 
-go 1.20
+go 1.25.0
 
 require (
 	cloud.google.com/go/compute/metadata v0.2.3
@@ -26,6 +26,6 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.8.3 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.13.0 // indirect
-	golang.org/x/sys v0.12.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 )
